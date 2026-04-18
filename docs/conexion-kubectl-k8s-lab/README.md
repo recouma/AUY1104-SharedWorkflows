@@ -19,6 +19,19 @@ Esta guía describe cómo usar **kubectl en tu PC** contra la instancia EC2 que 
 | `ssh` | Entrar a la EC2 y/o levantar túnel |
 | Clave `.pem` | La misma pareja que configuraste como `EA2_SSH_PRIVATE_KEY` en GitHub Secrets |
 
+## Script automático (bash)
+
+Desde una copia del repo:
+
+```bash
+chmod +x scripts/setup-kubectl-k3s-lab.sh
+./scripts/setup-kubectl-k3s-lab.sh
+```
+
+El script pide **IP pública**, **ruta al `.pem`**, opcionalmente **usuario SSH** (por defecto `ubuntu`) y **ruta del kubeconfig local** (por defecto `~/.kube/lab-k3s/k3s.yaml`). Comprueba que exista `kubectl`, prueba SSH, descarga `/etc/rancher/k3s/k3s.yaml` y sustituye `https://127.0.0.1:6443` por tu IP. Al final muestra los `export` para usar `kubectl`.
+
+Los mismos avisos que la guía manual aplican si ves **timeout en 6443** (Security Group) o **x509** (certificado sin tu IP pública): ver las secciones siguientes.
+
 ## Paso 1 — IP pública y SSH
 
 En el resumen del job de GitHub Actions verás la **IP pública** y el comando SSH de referencia. Ejemplo (sustituye la IP y la ruta a tu clave):
