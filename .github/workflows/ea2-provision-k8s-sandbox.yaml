@@ -3,7 +3,10 @@
 # Rama sugerida: EA2 (no mergear a main hasta liberar a alumnos)
 #
 # - workflow_call: lo invoca el repo del alumno con sus secretos AWS + SSH.
-# - workflow_dispatch: prueba desde este mismo repo (Actions → Run workflow).
+#   El checkout NO usa el repo del alumno: clona asanchezo-duoc/AUY1104-SharedWorkflows (fijo en YAML).
+# - workflow_dispatch: desde este repo, ref = github.ref; desde otro repo (raro), ref = EA2.
+#
+# Repo central público o con permisos para que el GITHUB_TOKEN del llamador pueda clonarlo.
 #
 # Contexto académico: sandbox ~3 h, state desechable, reglas de red amplias.
 # ─────────────────────────────────────────────────────────────
@@ -107,8 +110,12 @@ jobs:
       TF_IN_AUTOMATION: true
 
     steps:
-      - name: Descargar este repositorio (incluye infra Terraform)
+      # Repo/rama con el Terraform: fijos (no inputs) para que el alumno no tenga que verlos ni tocarlos.
+      - name: Descargar infra Terraform (repo central SharedWorkflows)
         uses: actions/checkout@v4
+        with:
+          repository: asanchezo-duoc/AUY1104-SharedWorkflows
+          ref: ${{ github.repository == 'asanchezo-duoc/AUY1104-SharedWorkflows' && github.ref || 'EA2' }}
 
       - name: Configurar credenciales AWS
         uses: aws-actions/configure-aws-credentials@v4

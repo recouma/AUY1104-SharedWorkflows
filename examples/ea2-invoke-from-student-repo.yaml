@@ -11,6 +11,9 @@
 #
 # Opcional — pulls privados Docker Hub (mismos secretos que EA1: DOCKER_USERNAME, DOCKER_PASSWORD).
 #   `provision_dockerhub: false` en `with:` si en clase crean el secret a mano; `true` para que la receta lo deje listo.
+#
+# La receta clona solo asanchezo-duoc/AUY1104-SharedWorkflows (rama EA2 si el run no es desde ese repo);
+# no hace falta copiar infra/ al repo del alumno.
 
 on:
   workflow_dispatch:
