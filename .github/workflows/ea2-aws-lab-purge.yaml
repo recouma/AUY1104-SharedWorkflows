@@ -1,0 +1,122 @@
+# ─────────────────────────────────────────────────────────────
+# Limpieza AWS sin terraform state:
+# - ea2-lab-tags: solo EC2/SG/keypairs del lab EA2 (tags/nombres del módulo Terraform).
+# - cloud-nuke-region: vacía casi todos los recursos en la región (peligroso; cuenta sandbox).
+#
+# Siempre probá primero con dry_run = true.
+# ─────────────────────────────────────────────────────────────
+
+name: EA2 — Purga AWS (sin state)
+
+on:
+  workflow_dispatch:
+    inputs:
+      purge_mode:
+        description: Modo de limpieza
+        required: true
+        type: choice
+        options:
+          - ea2-lab-tags
+          - cloud-nuke-region
+        default: ea2-lab-tags
+      aws_region:
+        description: Región AWS
+        required: true
+        type: string
+        default: us-east-1
+      dry_run:
+        description: Si true, solo muestra lo que haría (recomendado la primera vez)
+        required: true
+        type: boolean
+        default: true
+      confirm_destroy:
+        description: Para borrar de verdad con dry_run=false escribe PURGE-EA2-LAB (modo ea2) o NUKE-REGION-FULL (modo cloud-nuke). Si dry_run=true, ignorado.
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  purge-ea2-tags:
+    if: ${{ github.event.inputs.purge_mode == 'ea2-lab-tags' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      AWS_REGION: ${{ github.event.inputs.aws_region }}
+      DRY_RUN: ${{ github.event.inputs.dry_run }}
+    steps:
+      - name: Validar confirmación si es borrado real
+        env:
+          DRY: ${{ github.event.inputs.dry_run }}
+          CONF: ${{ github.event.inputs.confirm_destroy }}
+        run: |
+          set -euo pipefail
+          if [[ "$DRY" == "false" ]] && [[ "$CONF" != "PURGE-EA2-LAB" ]]; then
+            echo "::error::Con dry_run=false debés escribir exactamente PURGE-EA2-LAB en confirm_destroy."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Purga recursos EA2 (CLI)
+        run: |
+          chmod +x scripts/aws-purge-ea2-lab.sh
+          ./scripts/aws-purge-ea2-lab.sh
+
+  purge-cloud-nuke:
+    if: ${{ github.event.inputs.purge_mode == 'cloud-nuke-region' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      AWS_REGION: ${{ github.event.inputs.aws_region }}
+    steps:
+      - name: Validar confirmación si es borrado real
+        env:
+          DRY: ${{ github.event.inputs.dry_run }}
+          CONF: ${{ github.event.inputs.confirm_destroy }}
+        run: |
+          set -euo pipefail
+          if [[ "$DRY" == "false" ]] && [[ "$CONF" != "NUKE-REGION-FULL" ]]; then
+            echo "::error::Modo cloud-nuke con dry_run=false requiere confirm_destroy = NUKE-REGION-FULL (cuenta sandbox)."
+            exit 1
+          fi
+
+      - name: Configurar credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Instalar cloud-nuke
+        env:
+          CLOUD_NUKE_VERSION: v0.37.0
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/cloud-nuke \
+            "https://github.com/gruntwork-io/cloud-nuke/releases/download/${CLOUD_NUKE_VERSION}/cloud-nuke_linux_amd64"
+          chmod +x /tmp/cloud-nuke
+          sudo mv /tmp/cloud-nuke /usr/local/bin/cloud-nuke
+          cloud-nuke aws --help | head -n 5
+
+      - name: cloud-nuke (dry-run o force)
+        env:
+          DRY: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [[ "$DRY" == "true" ]]; then
+            cloud-nuke aws --region "$AWS_REGION" --dry-run
+          else
+            cloud-nuke aws --region "$AWS_REGION" --force
+          fi
