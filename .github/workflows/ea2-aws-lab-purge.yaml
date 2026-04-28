@@ -119,7 +119,8 @@ jobs:
           curl -fsSL -o /tmp/cloud-nuke "$ASSET_URL"
           chmod +x /tmp/cloud-nuke
           sudo mv /tmp/cloud-nuke /usr/local/bin/cloud-nuke
-          cloud-nuke aws --help | head -n 5
+          # No usar "| head": con pipefail cloud-nuke recibe SIGPIPE (exit 141).
+          cloud-nuke aws --help >/dev/null
 
       - name: cloud-nuke (dry-run o force)
         env:
