@@ -1,4 +1,4 @@
-# Disparador en main: delega en ea2-provision-cloud-lab.yaml en rama EA2.
+# Disparador en main: delega en infra2-ea2-provision-cloud-lab.yaml en rama EA2.
 # Copia este patron al repo del alumno (con ORG/USER correcto) o usa examples/ea2-invoke-cloud-lab-from-student-repo.yaml
 
 name: INFRA2 - EA2 cloud lab (delegado EA2) (remoto)
@@ -22,14 +22,31 @@ on:
         required: true
         type: string
         default: "42"
+      ec2_ami_id:
+        description: AMI Ubuntu 22.04 amd64 (EC2 Launch instance > copiar AMI ID)
+        required: true
+        type: string
+      availability_zone_a:
+        description: Primera AZ (debe existir en la region)
+        required: true
+        type: string
+        default: us-east-1a
+      availability_zone_b:
+        description: Segunda AZ
+        required: true
+        type: string
+        default: us-east-1b
 
 jobs:
   delegar:
-    uses: asanchezo-duoc/AUY1104-SharedWorkflows/.github/workflows/ea2-provision-cloud-lab.yaml@EA2
+    uses: asanchezo-duoc/AUY1104-SharedWorkflows/.github/workflows/infra2-ea2-provision-cloud-lab.yaml@EA2
     with:
       aws_region: ${{ inputs.aws_region }}
       instance_type: ${{ inputs.instance_type }}
       vpc_octet: ${{ inputs.vpc_octet }}
+      ec2_ami_id: ${{ inputs.ec2_ami_id }}
+      availability_zone_a: ${{ inputs.availability_zone_a }}
+      availability_zone_b: ${{ inputs.availability_zone_b }}
     secrets:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

@@ -39,6 +39,18 @@ on:
         required: false
         type: string
         default: "30100"
+      ec2_ami_id:
+        required: true
+        type: string
+        description: AMI Ubuntu 22.04 amd64 (consola EC2; sin DescribeImages en Academy)
+      availability_zone_a:
+        required: false
+        type: string
+        default: us-east-1a
+      availability_zone_b:
+        required: false
+        type: string
+        default: us-east-1b
     secrets:
       AWS_ACCESS_KEY_ID:
         required: true
@@ -79,6 +91,18 @@ on:
         required: true
         type: string
         default: "30100"
+      ec2_ami_id:
+        required: true
+        type: string
+        description: AMI Ubuntu 22.04 amd64 para la region elegida
+      availability_zone_a:
+        required: true
+        type: string
+        default: us-east-1a
+      availability_zone_b:
+        required: true
+        type: string
+        default: us-east-1b
 
 jobs:
   provision:
@@ -137,6 +161,8 @@ jobs:
           TF_VAR_k8s_api_cidr_ipv4: ${{ inputs.k8s_api_cidr_ipv4 }}
           TF_VAR_alb_nodeport_start: ${{ inputs.alb_nodeport_start }}
           TF_VAR_alb_nodeport_end: ${{ inputs.alb_nodeport_end }}
+          TF_VAR_ec2_ami_id: ${{ inputs.ec2_ami_id }}
+          TF_VAR_availability_zones: '["${{ inputs.availability_zone_a }}","${{ inputs.availability_zone_b }}"]'
         run: terraform apply -auto-approve
 
       - name: Salidas Terraform

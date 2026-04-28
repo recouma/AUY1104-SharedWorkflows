@@ -6,6 +6,9 @@
 #   EA2_SSH_PRIVATE_KEY  (PEM; misma pareja que usa Terraform en CI)
 # Opcional (AWS Academy / sesión temporal):
 #   AWS_SESSION_TOKEN
+#
+# AMI: en AWS Academy copiar AMI ID desde EC2 > Launch instance (Ubuntu 22.04 LTS 64-bit x86),
+#      sin usar DescribeImages en Terraform (politicas voc-cancel-cred / Voclabs).
 
 on:
   workflow_dispatch:
@@ -15,14 +18,31 @@ on:
         required: true
         type: string
         default: "42"
+      ec2_ami_id:
+        description: AMI Ubuntu 22.04 amd64 para tu region del Lab
+        required: true
+        type: string
+      availability_zone_a:
+        description: Primera zona (ej. us-east-1a)
+        required: true
+        type: string
+        default: us-east-1a
+      availability_zone_b:
+        description: Segunda zona
+        required: true
+        type: string
+        default: us-east-1b
 
 jobs:
   ea2-cloud-lab:
-    uses: ORG_O_USER/AUY1104-SharedWorkflows/.github/workflows/ea2-provision-cloud-lab.yaml@EA2
+    uses: ORG_O_USER/AUY1104-SharedWorkflows/.github/workflows/infra2-ea2-provision-cloud-lab.yaml@EA2
     with:
       aws_region: us-east-1
       instance_type: t3.medium
       vpc_octet: ${{ inputs.vpc_octet }}
+      ec2_ami_id: ${{ inputs.ec2_ami_id }}
+      availability_zone_a: ${{ inputs.availability_zone_a }}
+      availability_zone_b: ${{ inputs.availability_zone_b }}
     secrets:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

@@ -5,7 +5,7 @@ resource "aws_key_pair" "lab" {
 
 resource "aws_instance" "k3s" {
   count                       = 2
-  ami                         = data.aws_ami.ubuntu.id
+  ami                         = var.ec2_ami_id
   instance_type               = var.instance_type
   iam_instance_profile        = aws_iam_instance_profile.k3s.name
   key_name                    = aws_key_pair.lab.key_name

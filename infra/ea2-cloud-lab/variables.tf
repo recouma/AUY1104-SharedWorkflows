@@ -3,6 +3,27 @@ variable "aws_region" {
   description = "Región AWS (ej. us-east-1)"
 }
 
+variable "availability_zones" {
+  type        = list(string)
+  description = "Dos zonas de disponibilidad de tu laboratorio (sin usar ec2:DescribeAvailabilityZones). Deben corresponder a aws_region."
+  default     = ["us-east-1a", "us-east-1b"]
+
+  validation {
+    condition     = length(var.availability_zones) == 2
+    error_message = "Indica exactamente 2 zonas (ej. us-east-1a y us-east-1b)."
+  }
+}
+
+variable "ec2_ami_id" {
+  type        = string
+  description = "AMI Ubuntu 22.04 LTS amd64 para esta region. En AWS Academy: EC2 > Launch instance > copiar AMI ID (sin ec2:DescribeImages en Terraform)."
+
+  validation {
+    condition     = can(regex("^ami-[a-z0-9]+$", var.ec2_ami_id))
+    error_message = "ec2_ami_id debe ser un AMI ID valido (ami-...)."
+  }
+}
+
 variable "public_key" {
   type        = string
   description = "Clave pública SSH (una línea) para las instancias k3s"
