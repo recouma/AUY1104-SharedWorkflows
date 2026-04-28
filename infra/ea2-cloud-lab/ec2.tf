@@ -3,11 +3,13 @@ resource "aws_key_pair" "lab" {
   public_key = var.public_key
 }
 
+# Sin perfil IAM: muchas cuentas Academy/Voclabs no permiten iam:CreateRole.
+# ECR: el workflow crea imagePullSecrets con aws ecr get-login-password.
+
 resource "aws_instance" "k3s" {
   count                       = 2
   ami                         = data.aws_ami.ubuntu.id
   instance_type               = var.instance_type
-  iam_instance_profile        = aws_iam_instance_profile.k3s.name
   key_name                    = aws_key_pair.lab.key_name
   subnet_id                   = aws_subnet.public[count.index].id
   vpc_security_group_ids      = [aws_security_group.nlb_ec2.id]
