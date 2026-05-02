@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ea2-haproxy-academic
+  labels:
+    app: ea2-haproxy-academic
+    app.kubernetes.io/part-of: ea2-haproxy-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ea2-haproxy-academic
+  template:
+    metadata:
+      labels:
+        app: ea2-haproxy-academic
+    spec:
+      containers:
+        - name: haproxy
+          image: haproxy:2.8-alpine
+          ports:
+            - name: http
+              containerPort: 8080
+          volumeMounts:
+            - name: cfg
+              mountPath: /usr/local/etc/haproxy/haproxy.cfg
+              subPath: haproxy.cfg
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+      volumes:
+        - name: cfg
+          configMap:
+            name: ea2-haproxy-academic

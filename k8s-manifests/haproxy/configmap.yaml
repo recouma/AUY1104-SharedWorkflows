@@ -1,0 +1,47 @@
+# HAProxy mínimo (aula): un solo borde :8080, varios prefijos.
+# - /test     → student-api:8080 (strip /test), otro backend académico
+# - /backend  → demo-api:3000 (strip /backend), extensión Docker Hub / SharedClient
+# Sin TLS — solo laboratorio.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ea2-haproxy-academic
+  labels:
+    app.kubernetes.io/component: haproxy-academic
+    app.kubernetes.io/part-of: ea2-haproxy-lab
+data:
+  haproxy.cfg: |
+    global
+      log stdout format raw local0 info
+      maxconn 4096
+
+    defaults
+      mode http
+      log global
+      option httplog
+      timeout connect 5s
+      timeout client  50s
+      timeout server  50s
+
+    frontend fe_main
+      bind *:8080
+      acl is_test path_beg /test
+      acl is_backend path_beg /backend
+      use_backend be_test if is_test
+      use_backend be_docker if is_backend
+      default_backend be_ok
+
+    backend be_test
+      http-request replace-path ^/test$ /
+      http-request replace-path ^/test/(.*) /\1
+      option httpchk GET /health
+      server app student-api.default.svc.cluster.local:8080 check inter 5s fall 3 rise 2
+
+    backend be_docker
+      http-request replace-path ^/backend$ /
+      http-request replace-path ^/backend/(.*) /\1
+      option httpchk GET /health
+      server app demo-api.default.svc.cluster.local:3000 check inter 5s fall 3 rise 2
+
+    backend be_ok
+      http-request return status 200 content-type text/plain lf-string "ea2-haproxy-academic OK. Rutas: /test/health (student-api), /backend/health (demo-api)\n"
