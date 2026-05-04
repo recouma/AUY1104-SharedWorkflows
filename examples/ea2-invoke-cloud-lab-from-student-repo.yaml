@@ -8,6 +8,9 @@
 #   AWS_SESSION_TOKEN
 #
 # AMI y zonas: resueltas en Terraform igual que ea2-provision-k8s-sandbox (data.aws_ami + data.aws_availability_zones).
+#
+# Variable repo: EA2_S3_BUCKET = bucket donde el workflow guarda estado (ea2-cloud-lab/status/*.json).
+# Crear bucket antes (ea2-s3-create-bucket o consola AWS); IAM necesita s3:PutObject.
 
 on:
   workflow_dispatch:
@@ -25,6 +28,7 @@ jobs:
       aws_region: us-east-1
       instance_type: t3.medium
       vpc_octet: ${{ inputs.vpc_octet }}
+      s3_status_bucket: ${{ vars.EA2_S3_BUCKET }}
     secrets:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
