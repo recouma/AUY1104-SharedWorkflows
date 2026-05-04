@@ -1,0 +1,20 @@
+# Copiar a .github/workflows/ del alumno. Ajustar ORG/USER y @EA2.
+# Luego: Settings → Variables → EA2_S3_BUCKET = mismo nombre usado al ejecutar.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bucket_name:
+        required: true
+        type: string
+
+jobs:
+  s3:
+    uses: asanchezo-duoc/AUY1104-SharedWorkflows/.github/workflows/ea2-s3-create-bucket.yaml@EA2
+    with:
+      aws_region: us-east-1
+      bucket_name: ${{ inputs.bucket_name }}
+    secrets:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}

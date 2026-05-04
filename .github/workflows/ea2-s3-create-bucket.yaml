@@ -1,0 +1,85 @@
+# EA2 · Solo crear bucket S3 (privado por defecto).
+# IAM: s3:CreateBucket, s3:HeadBucket, s3:PutPublicAccessBlock
+# Vocareum a veces sin CreateBucket → mismo límite que ECR.
+#
+# Siguiente paso manual: repo → Settings → Variables → Actions
+#   EA2_S3_BUCKET = nombre que usaste aquí (para workflows de infra).
+
+name: EA2 — crear bucket S3
+
+on:
+  workflow_call:
+    inputs:
+      aws_region:
+        required: false
+        type: string
+        default: us-east-1
+      bucket_name:
+        required: true
+        type: string
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_SESSION_TOKEN:
+        required: false
+
+  workflow_dispatch:
+    inputs:
+      aws_region:
+        required: true
+        type: string
+        default: us-east-1
+      bucket_name:
+        description: Nombre global único (minúsculas)
+        required: true
+        type: string
+
+jobs:
+  s3:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    env:
+      AWS_REGION: ${{ inputs.aws_region }}
+      BUCKET_NAME: ${{ inputs.bucket_name }}
+
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Crear bucket
+        run: |
+          set -euo pipefail
+          if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+            echo "Ya existe: $BUCKET_NAME"
+            exit 0
+          fi
+          if [ "$AWS_REGION" = "us-east-1" ]; then
+            aws s3api create-bucket --bucket "$BUCKET_NAME"
+          else
+            aws s3api create-bucket --bucket "$BUCKET_NAME" \
+              --create-bucket-configuration "LocationConstraint=${AWS_REGION}"
+          fi
+
+      - name: Sin acceso público
+        run: |
+          aws s3api put-public-access-block --bucket "$BUCKET_NAME" \
+            --public-access-block-configuration \
+            BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+      - name: Resumen
+        run: |
+          {
+            echo "### Bucket creado (o ya existía)"
+            echo "**Nombre:** \`$BUCKET_NAME\`"
+            echo "**Región:** \`$AWS_REGION\`"
+            echo ""
+            echo "Variable sugerida en el repo: \`EA2_S3_BUCKET\` = \`$BUCKET_NAME\`"
+          } >> "$GITHUB_STEP_SUMMARY"

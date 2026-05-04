@@ -2,8 +2,7 @@
 # Disparador en rama default (main): GitHub solo lista en Actions
 # los workflows que existen en la rama por defecto del repo.
 #
-# Este archivo delega en la receta real en la rama EA2 (@EA2).
-# Así podés iterar en EA2 sin mergear a main hasta liberar a alumnos.
+# Este archivo delega en la receta de provisión en el mismo repositorio (@main).
 # ─────────────────────────────────────────────────────────────
 
 name: Ej K8S desde alumno
