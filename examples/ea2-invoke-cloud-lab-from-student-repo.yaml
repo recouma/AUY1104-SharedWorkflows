@@ -10,8 +10,8 @@
 #
 # AMI y zonas: resueltas en Terraform igual que ea2-provision-k8s-sandbox (data.aws_ami + data.aws_availability_zones).
 #
-# Variable repo: EA2_S3_BUCKET = bucket donde el workflow guarda estado (ea2-cloud-lab/status/*.json).
-# Crear bucket antes (ea2-s3-create-bucket o consola AWS); IAM necesita s3:PutObject.
+# Variable repo: EA2_S3_BUCKET = bucket del backend Terraform (terraform.tfstate en ea2-cloud-lab/<org>-<repo>/).
+# Crear bucket antes (ea2-s3-create-bucket o consola). IAM: Get/Put/Delete/List en ese prefijo.
 
 on:
   workflow_dispatch:

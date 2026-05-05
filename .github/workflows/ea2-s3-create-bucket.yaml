@@ -2,8 +2,7 @@
 # IAM: s3:CreateBucket, s3:HeadBucket, s3:PutPublicAccessBlock
 # Vocareum a veces sin CreateBucket → mismo límite que ECR.
 #
-# Siguiente paso manual: repo → Settings → Variables → Actions
-#   EA2_S3_BUCKET = nombre que usaste aquí (para workflows de infra).
+# Siguiente paso: repo → Variables → EA2_S3_BUCKET = este bucket (backend Terraform cloud-lab).
 
 name: EA2 — crear bucket S3
 

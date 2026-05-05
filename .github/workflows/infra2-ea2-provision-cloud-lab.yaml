@@ -1,6 +1,7 @@
 # EA2 · Laboratorio cloud (VPC + 2 MV k3s autocontenido + NLB TCP + RDS + manifiestos)
-# Status obligatorio en S3: input s3_status_bucket (ej. variable repo EA2_S3_BUCKET).
-# IAM: además del resto del lab, s3:PutObject sobre ese bucket (prefijo ea2-cloud-lab/status/).
+# Estado Terraform en S3 (backend remoto): input s3_status_bucket = mismo bucket variable EA2_S3_BUCKET.
+# IAM: s3:GetObject, PutObject, DeleteObject, ListBucket sobre ea2-cloud-lab/<repo>/terraform.tfstate
+#      (sin Dynamo lock por compat Vocareum; no correr dos applies en paralelo al mismo state).
 #
 # - workflow_call: AWS + EA2_SSH_PRIVATE_KEY + DOCKER_USERNAME/PASSWORD (push Docker Hub).
 # - workflow_dispatch: desde este repo (ref actual) o EA2 si se invoca desde otro.
@@ -45,7 +46,7 @@ on:
         type: string
         default: "30100"
       s3_status_bucket:
-        description: Bucket S3 donde guardar JSON de estado (obligatorio)
+        description: Bucket S3 para backend Terraform (terraform.tfstate persistente entre corridas)
         required: true
         type: string
     secrets:
@@ -93,7 +94,7 @@ on:
         type: string
         default: "30100"
       s3_status_bucket:
-        description: Bucket S3 para estado del lab (crear antes con ea2-s3-create-bucket o AWS console)
+        description: Bucket S3 para terraform.tfstate (ea2-s3-create-bucket u otro; una vez por repo)
         required: true
         type: string
 
@@ -124,12 +125,12 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ inputs.aws_region }}
 
-      - name: Validar bucket S3 (status obligatorio)
+      - name: Validar bucket S3 (backend Terraform)
         run: |
           set -euo pipefail
           B="${{ inputs.s3_status_bucket }}"
           if [ -z "$B" ]; then
-            echo "::error::Definí s3_status_bucket (recomendado variable repo EA2_S3_BUCKET y pasarla al workflow)."
+            echo "::error::Definí s3_status_bucket (variable repo EA2_S3_BUCKET)."
             exit 1
           fi
 
@@ -148,10 +149,25 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.9.0
+          terraform_wrapper: false
 
-      - name: terraform init
+      - name: terraform init (backend S3 — estado entre corridas)
+        id: tf_backend
         working-directory: infra/ea2-cloud-lab
-        run: terraform init
+        env:
+          BUCKET: ${{ inputs.s3_status_bucket }}
+          AWS_REGION: ${{ inputs.aws_region }}
+        run: |
+          set -euo pipefail
+          SAFE_REPO=$(echo '${{ github.repository }}' | tr '/' '-')
+          STATE_KEY="ea2-cloud-lab/${SAFE_REPO}/terraform.tfstate"
+          echo "Terraform state: s3://${BUCKET}/${STATE_KEY}"
+          terraform init -input=false \
+            -backend-config="bucket=${BUCKET}" \
+            -backend-config="key=${STATE_KEY}" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="encrypt=true"
+          echo "state_uri=s3://${BUCKET}/${STATE_KEY}" >> "$GITHUB_OUTPUT"
 
       - name: terraform apply
         working-directory: infra/ea2-cloud-lab
@@ -301,91 +317,7 @@ jobs:
             echo "**SSH VM A:** \`ssh -i <pem> ubuntu@${VM_A_PUB}\`"
             echo "**SSH VM B:** \`ssh -i <pem> ubuntu@${VM_B_PUB}\`"
             echo "**Imagen API (Docker Hub):** \`$API_IMAGE\`"
+            echo "**Terraform state (S3):** \`${{ steps.tf_backend.outputs.state_uri }}\`"
             kubectl get nodes -o wide || true
             kubectl get svc,po -A || true
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Subir status a S3
-        env:
-          BUCKET: ${{ inputs.s3_status_bucket }}
-          NLB: ${{ steps.tf.outputs.nlb }}
-          VM_A_PUB: ${{ steps.tf.outputs.vm_a_pub }}
-          VM_B_PUB: ${{ steps.tf.outputs.vm_b_pub }}
-          API_IMAGE: ${{ steps.api_image.outputs.image }}
-          RDS_PRIMARY: ${{ steps.tf.outputs.rds_primary }}
-          RDS_REPLICA: ${{ steps.tf.outputs.rds_replica }}
-          RDS_USER: ${{ steps.tf.outputs.rds_user }}
-          AWS_REGION_I: ${{ inputs.aws_region }}
-          ITYPE: ${{ inputs.instance_type }}
-          VPC_OCTET: ${{ inputs.vpc_octet }}
-          SSH_CIDR: ${{ inputs.ssh_cidr_ipv4 }}
-          K8S_API_CIDR: ${{ inputs.k8s_api_cidr_ipv4 }}
-          NODEPORT_LO: ${{ inputs.alb_nodeport_start }}
-          NODEPORT_HI: ${{ inputs.alb_nodeport_end }}
-        run: |
-          set -euo pipefail
-          TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          jq -n \
-            --arg ts "$TS" \
-            --arg phase success \
-            --arg run "${GITHUB_RUN_ID}" \
-            --arg url "$RUN_URL" \
-            --arg repo "${GITHUB_REPOSITORY}" \
-            --arg sha "${GITHUB_SHA}" \
-            --arg wf "${GITHUB_WORKFLOW}" \
-            --arg region "$AWS_REGION_I" \
-            --arg itype "$ITYPE" \
-            --arg vpc "$VPC_OCTET" \
-            --arg scidr "$SSH_CIDR" \
-            --arg kcidr "$K8S_API_CIDR" \
-            --arg np0 "$NODEPORT_LO" \
-            --arg np1 "$NODEPORT_HI" \
-            --arg vma "$VM_A_PUB" \
-            --arg vmb "$VM_B_PUB" \
-            --arg nlb "$NLB" \
-            --arg img "$API_IMAGE" \
-            --arg rds_p "$RDS_PRIMARY" \
-            --arg rds_r "$RDS_REPLICA" \
-            --arg rds_u "$RDS_USER" \
-            --arg bucket "$BUCKET" \
-            '{
-              schema_version: 1,
-              phase: $phase,
-              completed_at: $ts,
-              s3_status_bucket: $bucket,
-              github: { workflow: $wf, run_id: $run, run_url: $url, repository: $repo, sha: $sha },
-              inputs: {
-                aws_region: $region,
-                instance_type: $itype,
-                vpc_octet: $vpc,
-                ssh_cidr_ipv4: $scidr,
-                k8s_api_cidr_ipv4: $kcidr,
-                alb_nodeport_start: $np0,
-                alb_nodeport_end: $np1
-              },
-              terraform_outputs: {
-                vm_a_public_ip: $vma,
-                vm_b_public_ip: $vmb,
-                nlb_dns: $nlb,
-                api_container_image: $img,
-                rds_primary_endpoint: $rds_p,
-                rds_replica_endpoint: $rds_r,
-                rds_master_username: $rds_u
-              },
-              endpoints: {
-                api_example: ("http://" + $nlb + ":30080/db-primary"),
-                grafana: ("http://" + $nlb + ":30200")
-              }
-            }' > /tmp/ea2-cloud-lab-status.json
-          aws s3 cp /tmp/ea2-cloud-lab-status.json \
-            "s3://${BUCKET}/ea2-cloud-lab/status/latest.json" \
-            --content-type application/json
-          aws s3 cp /tmp/ea2-cloud-lab-status.json \
-            "s3://${BUCKET}/ea2-cloud-lab/status/run-${GITHUB_RUN_ID}.json" \
-            --content-type application/json
-          {
-            echo ""
-            echo "**Status S3:** \`s3://${BUCKET}/ea2-cloud-lab/status/latest.json\`"
-            echo "**Historial run:** \`s3://${BUCKET}/ea2-cloud-lab/status/run-${GITHUB_RUN_ID}.json\`"
           } >> "$GITHUB_STEP_SUMMARY"

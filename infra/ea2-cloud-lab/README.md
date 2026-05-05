@@ -52,9 +52,17 @@ El laboratorio implementa una arquitectura de red segmentada en AWS, diseñada p
 
 ## 🚀 Proceso de Despliegue (CI/CD)
 
+### Estado de Terraform en S3 (obligatorio en CI)
+
+El workflow usa **backend remoto S3** (`ea2-cloud-lab/<org>-<repo>/terraform.tfstate` en el bucket de la variable `EA2_S3_BUCKET`). Así la **segunda ejecución** reutiliza el state: `apply` solo crea o cambia lo necesario, no vuelve a levantar toda la VPC desde cero en cada run.
+
+- **IAM:** `s3:GetObject`, `PutObject`, `DeleteObject` y `ListBucket` sobre ese prefijo.
+- **Sin lock DynamoDB** (compatibilidad con cuentas restringidas): no dispares dos workflows al mismo tiempo contra el mismo state.
+- **Purge script / borrado manual en AWS** sin `terraform destroy`: el `.tfstate` en S3 puede quedar desalineado. Borra el objeto `terraform.tfstate` en S3 o usa `terraform state` / `destroy` acorde; si no, el próximo `apply` puede fallar o recrear de forma incoherente.
+
 El pipeline `infra2-ea2-provision-cloud-lab.yaml` automatiza todo el ciclo de vida:
 
-1.  **Plan & Apply (Terraform):** Crea la red, servidores y base de datos.
+1.  **Init + Plan & Apply (Terraform):** `terraform init` con backend S3, luego crea o actualiza red, servidores y base de datos según el state.
 2.  **Instalación K8s:** Ejecuta scripts remotos vía SSH para configurar K3s en ambas máquinas virtuales.
 3.  **Build & Push (API):** Construye la imagen de la API y la sube a Docker Hub (`<usuario>/ea2-cloud-lab-api:latest`).
 4.  **K8s Configuration:** Crea los `Secrets` necesarios (credenciales RDS y pull secret de Docker Hub).
@@ -70,6 +78,7 @@ Al finalizar el despliegue, la infraestructura entrega los siguientes puntos de 
 *   **RDS Primary/Replica Endpoints:** Direcciones internas para la base de datos.
 *   **Imagen API:** Referencia Docker Hub publicada por el pipeline.
 *   **VM Public IPs:** Direcciones para acceso administrativo vía SSH.
+*   **State S3:** URI `s3://<bucket>/ea2-cloud-lab/<repo>/terraform.tfstate` (misma que muestra el resumen del job).
 
 ---
 

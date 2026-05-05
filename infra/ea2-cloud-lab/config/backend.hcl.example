@@ -1,0 +1,10 @@
+# Copiar a backend.hcl (no commitear si contiene nombres sensibles) y ajustar bucket/key.
+# Debe coincidir con el path del CI: ea2-cloud-lab/<org>-<repo>/terraform.tfstate
+#
+#   terraform init -backend-config=config/backend.hcl
+#   terraform plan
+#
+bucket  = "tu-bucket"
+key     = "ea2-cloud-lab/tu-org-tu-repo/terraform.tfstate"
+region  = "us-east-1"
+encrypt = true

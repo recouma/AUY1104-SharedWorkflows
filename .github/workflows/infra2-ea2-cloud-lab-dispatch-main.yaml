@@ -1,5 +1,5 @@
 # Disparador en main: delega en infra2-ea2-provision-cloud-lab.yaml en rama EA2.
-# Variable repo obligatoria: EA2_S3_BUCKET (nombre del bucket para JSON de status).
+# Variable repo obligatoria: EA2_S3_BUCKET (backend Terraform; terraform.tfstate persistente).
 # Copia este patron al repo del alumno (con ORG/USER correcto) o usa examples/ea2-invoke-cloud-lab-from-student-repo.yaml
 
 name: INFRA2 - EA2 cloud lab (delegado EA2) (remoto)
