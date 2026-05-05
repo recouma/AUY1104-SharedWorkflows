@@ -4,7 +4,7 @@ resource "aws_key_pair" "lab" {
 }
 
 # Sin perfil IAM: muchas cuentas Academy/Voclabs no permiten iam:CreateRole.
-# ECR: el workflow crea imagePullSecrets con aws ecr get-login-password.
+# Imagen API: build/push Docker Hub en CI; secret dockerhub-pull en el cluster.
 
 resource "aws_instance" "k3s" {
   count                       = 2

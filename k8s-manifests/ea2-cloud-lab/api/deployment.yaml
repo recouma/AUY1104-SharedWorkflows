@@ -15,10 +15,10 @@ spec:
         app: ea2-api
     spec:
       imagePullSecrets:
-        - name: ecr-pull
+        - name: dockerhub-pull
       containers:
         - name: api
-          image: REPLACE_ECR_IMAGE
+          image: REPLACE_API_IMAGE
           ports:
             - containerPort: 8080
           envFrom:

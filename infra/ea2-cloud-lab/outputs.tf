@@ -37,11 +37,6 @@ output "ssh_user" {
   value = "ubuntu"
 }
 
-output "ecr_repository_url" {
-  value       = aws_ecr_repository.api.repository_url
-  description = "URL para docker push de la API de ejemplo"
-}
-
 output "rds_primary_endpoint" {
   value       = aws_db_instance.primary.address
   description = "Endpoint MySQL primario (escritura)"

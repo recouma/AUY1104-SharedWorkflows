@@ -32,8 +32,8 @@ El laboratorio implementa una arquitectura de red segmentada en AWS, diseñada p
     *   **API:** Acceso balanceado hacia los contenedores de la aplicación.
     *   **Grafana:** Acceso directo al dashboard de monitoreo vía puerto 30200.
 
-### 5. Registro de Imágenes (ECR)
-*   **Amazon ECR:** Repositorio privado para el almacenamiento de imágenes Docker de la API, integrado con escaneo de vulnerabilidades al subir cambios.
+### 5. Registro de imágenes (Docker Hub)
+*   **Docker Hub:** La API se construye en CI y se publica con la cuenta del alumno (`DOCKER_USERNAME` / `DOCKER_PASSWORD` en GitHub Secrets). Compatible con cuentas tipo AWS Academy sin permiso `ecr:CreateRepository`.
 
 ---
 
@@ -56,8 +56,8 @@ El pipeline `infra2-ea2-provision-cloud-lab.yaml` automatiza todo el ciclo de vi
 
 1.  **Plan & Apply (Terraform):** Crea la red, servidores y base de datos.
 2.  **Instalación K8s:** Ejecuta scripts remotos vía SSH para configurar K3s en ambas máquinas virtuales.
-3.  **Build & Push (API):** Construye la imagen de la API y la sube al repositorio ECR.
-4.  **K8s Configuration:** Crea los `Secrets` necesarios (credenciales de base de datos y llaves de acceso al ECR).
+3.  **Build & Push (API):** Construye la imagen de la API y la sube a Docker Hub (`<usuario>/ea2-cloud-lab-api:latest`).
+4.  **K8s Configuration:** Crea los `Secrets` necesarios (credenciales RDS y pull secret de Docker Hub).
 5.  **Workload Deployment:** Despliega la API y Grafana sobre el clúster.
 
 ---
@@ -68,7 +68,7 @@ Al finalizar el despliegue, la infraestructura entrega los siguientes puntos de 
 
 *   **NLB DNS:** La URL pública para acceder a los servicios.
 *   **RDS Primary/Replica Endpoints:** Direcciones internas para la base de datos.
-*   **ECR Repository URL:** Dirección del repositorio de imágenes.
+*   **Imagen API:** Referencia Docker Hub publicada por el pipeline.
 *   **VM Public IPs:** Direcciones para acceso administrativo vía SSH.
 
 ---

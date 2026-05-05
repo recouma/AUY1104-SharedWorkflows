@@ -1,8 +1,8 @@
-# EA2 · Laboratorio cloud (VPC + 2 MV k3s autocontenido + NLB TCP + RDS + ECR + manifiestos)
+# EA2 · Laboratorio cloud (VPC + 2 MV k3s autocontenido + NLB TCP + RDS + manifiestos)
 # Status obligatorio en S3: input s3_status_bucket (ej. variable repo EA2_S3_BUCKET).
 # IAM: además del resto del lab, s3:PutObject sobre ese bucket (prefijo ea2-cloud-lab/status/).
 #
-# - workflow_call: repos de alumnos con los mismos secretos AWS + EA2_SSH_PRIVATE_KEY.
+# - workflow_call: AWS + EA2_SSH_PRIVATE_KEY + DOCKER_USERNAME/PASSWORD (push Docker Hub).
 # - workflow_dispatch: desde este repo (ref actual) o EA2 si se invoca desde otro.
 #
 # El balanceador es un NLB (TCP). Un ALB clasico no reenvia NodePorts TCP arbitrarios.
@@ -11,7 +11,7 @@
 # AMI + AZ: mismos data sources que infra/ea2-sandbox-vm (receta ea2-provision-k8s-sandbox.yaml).
 
 name: INFRA2 - Provisionar EA2 cloud lab (Terraform + k3s + workloads) (local)
-description: VPC, 2 MV Ubuntu misma instalación k3s (sandbox), NLB TCP, RDS, ECR, manifiestos.
+description: VPC, 2 MV Ubuntu misma instalación k3s (sandbox), NLB TCP, RDS, API en Docker Hub, manifiestos.
 
 on:
   workflow_call:
@@ -56,6 +56,10 @@ on:
       AWS_SESSION_TOKEN:
         required: false
       EA2_SSH_PRIVATE_KEY:
+        required: true
+      DOCKER_USERNAME:
+        required: true
+      DOCKER_PASSWORD:
         required: true
 
   workflow_dispatch:
@@ -168,7 +172,6 @@ jobs:
           echo "vm_a_pub=$(terraform output -raw vm_a_public_ip)" >> "$GITHUB_OUTPUT"
           echo "vm_b_pub=$(terraform output -raw vm_b_public_ip)" >> "$GITHUB_OUTPUT"
           echo "nlb=$(terraform output -raw nlb_dns_name)" >> "$GITHUB_OUTPUT"
-          echo "ecr=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
           echo "rds_primary=$(terraform output -raw rds_primary_endpoint)" >> "$GITHUB_OUTPUT"
           echo "rds_replica=$(terraform output -raw rds_replica_endpoint)" >> "$GITHUB_OUTPUT"
           echo "rds_user=$(terraform output -raw rds_master_username)" >> "$GITHUB_OUTPUT"
@@ -234,32 +237,38 @@ jobs:
           sed -i "s/127.0.0.1/${VM_A_PUB}/g" ./k3s.yaml
           echo "KUBECONFIG=$PWD/k3s.yaml" >> "$GITHUB_ENV"
 
-      - name: Login ECR + build/push API
+      - name: Login Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build y push imagen API (Docker Hub)
+        id: api_image
         env:
-          ECR_URL: ${{ steps.tf.outputs.ecr }}
-          AWS_REGION: ${{ inputs.aws_region }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         run: |
           set -euo pipefail
-          REGISTRY=$(echo "$ECR_URL" | cut -d/ -f1)
-          aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
-          docker build -t "${ECR_URL}:latest" k8s-manifests/ea2-cloud-lab/api
-          docker push "${ECR_URL}:latest"
+          IMG="${DOCKER_USERNAME}/ea2-cloud-lab-api:latest"
+          docker build -t "$IMG" k8s-manifests/ea2-cloud-lab/api
+          docker push "$IMG"
+          echo "image=$IMG" >> "$GITHUB_OUTPUT"
 
-      - name: Secret ECR + RDS + despliegues
+      - name: Secrets Docker Hub + RDS + despliegues
         env:
-          ECR_URL: ${{ steps.tf.outputs.ecr }}
-          AWS_REGION: ${{ inputs.aws_region }}
+          API_IMAGE: ${{ steps.api_image.outputs.image }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
           RDS_PRIMARY: ${{ steps.tf.outputs.rds_primary }}
           RDS_REPLICA: ${{ steps.tf.outputs.rds_replica }}
           RDS_USER: ${{ steps.tf.outputs.rds_user }}
         working-directory: infra/ea2-cloud-lab
         run: |
           set -euo pipefail
-          REGISTRY=$(echo "$ECR_URL" | cut -d/ -f1)
-          kubectl create secret docker-registry ecr-pull \
-            --docker-server="$REGISTRY" \
-            --docker-username=AWS \
-            --docker-password="$(aws ecr get-login-password --region "$AWS_REGION")" \
+          kubectl create secret docker-registry dockerhub-pull \
+            --docker-server=https://index.docker.io/v1/ \
+            --docker-username="$DOCKER_USERNAME" \
+            --docker-password="$DOCKER_PASSWORD" \
             --dry-run=client -o yaml | kubectl apply -f -
 
           DB_PASS="$(terraform output -raw rds_master_password)"
@@ -271,7 +280,7 @@ jobs:
             --from-literal=DB_NAME=labdb \
             --dry-run=client -o yaml | kubectl apply -f -
 
-          sed "s|REPLACE_ECR_IMAGE|${ECR_URL}:latest|g" \
+          sed "s|REPLACE_API_IMAGE|$API_IMAGE|g" \
             ../../k8s-manifests/ea2-cloud-lab/api/deployment.yaml | kubectl apply -f -
           kubectl apply -f ../../k8s-manifests/ea2-cloud-lab/api/service.yaml
           kubectl apply -f ../../k8s-manifests/ea2-cloud-lab/grafana/
@@ -281,7 +290,7 @@ jobs:
           NLB: ${{ steps.tf.outputs.nlb }}
           VM_A_PUB: ${{ steps.tf.outputs.vm_a_pub }}
           VM_B_PUB: ${{ steps.tf.outputs.vm_b_pub }}
-          ECR_URL: ${{ steps.tf.outputs.ecr }}
+          API_IMAGE: ${{ steps.api_image.outputs.image }}
         run: |
           {
             echo "### EA2 cloud lab"
@@ -291,7 +300,7 @@ jobs:
             echo "**Grafana:** \`http://${NLB}:30200\` (admin / LabEa2Grafana)"
             echo "**SSH VM A:** \`ssh -i <pem> ubuntu@${VM_A_PUB}\`"
             echo "**SSH VM B:** \`ssh -i <pem> ubuntu@${VM_B_PUB}\`"
-            echo "**ECR API:** \`${ECR_URL}:latest\`"
+            echo "**Imagen API (Docker Hub):** \`$API_IMAGE\`"
             kubectl get nodes -o wide || true
             kubectl get svc,po -A || true
           } >> "$GITHUB_STEP_SUMMARY"
@@ -302,7 +311,7 @@ jobs:
           NLB: ${{ steps.tf.outputs.nlb }}
           VM_A_PUB: ${{ steps.tf.outputs.vm_a_pub }}
           VM_B_PUB: ${{ steps.tf.outputs.vm_b_pub }}
-          ECR_URL: ${{ steps.tf.outputs.ecr }}
+          API_IMAGE: ${{ steps.api_image.outputs.image }}
           RDS_PRIMARY: ${{ steps.tf.outputs.rds_primary }}
           RDS_REPLICA: ${{ steps.tf.outputs.rds_replica }}
           RDS_USER: ${{ steps.tf.outputs.rds_user }}
@@ -335,7 +344,7 @@ jobs:
             --arg vma "$VM_A_PUB" \
             --arg vmb "$VM_B_PUB" \
             --arg nlb "$NLB" \
-            --arg ecr "$ECR_URL" \
+            --arg img "$API_IMAGE" \
             --arg rds_p "$RDS_PRIMARY" \
             --arg rds_r "$RDS_REPLICA" \
             --arg rds_u "$RDS_USER" \
@@ -359,7 +368,7 @@ jobs:
                 vm_a_public_ip: $vma,
                 vm_b_public_ip: $vmb,
                 nlb_dns: $nlb,
-                ecr_repository_url: $ecr,
+                api_container_image: $img,
                 rds_primary_endpoint: $rds_p,
                 rds_replica_endpoint: $rds_r,
                 rds_master_username: $rds_u
