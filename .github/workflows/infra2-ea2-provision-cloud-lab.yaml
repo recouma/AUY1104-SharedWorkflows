@@ -4,7 +4,7 @@
 #      (sin Dynamo lock por compat Vocareum; no correr dos applies en paralelo al mismo state).
 #
 # - workflow_call: AWS + EA2_SSH_PRIVATE_KEY + DOCKER_USERNAME/PASSWORD (push Docker Hub).
-# - workflow_dispatch: desde este repo (ref actual) o EA2 si se invoca desde otro.
+# - workflow_dispatch: checkout siempre desde main (ref fijo, sin ramas alternas).
 #
 # El balanceador es un NLB (TCP). Un ALB clasico no reenvia NodePorts TCP arbitrarios.
 # DNS publico: usar el hostname del NLB o Route53 (inputs opcionales en Terraform).
@@ -115,7 +115,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: asanchezo-duoc/AUY1104-SharedWorkflows
-          ref: ${{ github.repository == 'asanchezo-duoc/AUY1104-SharedWorkflows' && github.ref || 'EA2' }}
+          ref: main
 
       - name: Credenciales AWS
         uses: aws-actions/configure-aws-credentials@v4
