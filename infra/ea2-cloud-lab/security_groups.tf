@@ -28,11 +28,19 @@ resource "aws_security_group" "nlb_ec2" {
   }
 
   ingress {
-    description = "k3s y canal entre nodos"
-    from_port = 0
-    to_port   = 0
-    protocol  = "-1"
-    self      = true
+    description = "k3s y canal entre nodos (self)"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    self        = true
+  }
+
+  ingress {
+    description = "trafico interno VPC entre nodos"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["10.0.0.0/8"]
   }
 
   egress {

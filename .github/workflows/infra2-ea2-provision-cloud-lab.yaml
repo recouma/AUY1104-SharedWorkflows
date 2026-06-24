@@ -114,7 +114,7 @@ jobs:
       - name: Descargar infra (SharedWorkflows)
         uses: actions/checkout@v4
         with:
-          repository: asanchezo-duoc/AUY1104-SharedWorkflows
+          repository: recouma/AUY1104-SharedWorkflows
           ref: main
 
       - name: Credenciales AWS
@@ -223,29 +223,35 @@ jobs:
           done
           exit 1
 
-      # Misma instalación k3s que ea2-provision-k8s-sandbox.yaml (step "Instalar stack Kubernetes", rama k3s), repetida por MV.
-      - name: Instalar k3s (2× igual que sandbox)
+      - name: Instalar k3s master (VM A)
+        env:
+          VM_A_PUB: ${{ steps.tf.outputs.vm_a_pub }}
+        run: |
+          set -euo pipefail
+          REMOTE="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/ea2_lab.pem ubuntu@${VM_A_PUB}"
+          $REMOTE "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--write-kubeconfig-mode 644 --tls-san ${VM_A_PUB}' sh -"
+          sleep 15
+          $REMOTE 'sudo kubectl get nodes'
+
+      - name: Instalar k3s agent (VM B une al cluster de VM A)
         env:
           VM_A_PUB: ${{ steps.tf.outputs.vm_a_pub }}
           VM_B_PUB: ${{ steps.tf.outputs.vm_b_pub }}
         run: |
           set -euo pipefail
-          k3s_sandbox_install() {
-            PUBLIC_IP=${1:?ip}
-            REMOTE='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/ea2_lab.pem ubuntu@'"$PUBLIC_IP"
-            # --tls-san IP publica: igual comentario que sandbox (cert vs elastic IP).
-            $REMOTE "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC=\"--write-kubeconfig-mode 644 --tls-san ${PUBLIC_IP}\" sh -"
-            $REMOTE 'sudo kubectl get nodes || true'
-          }
-          k3s_sandbox_install "$VM_A_PUB"
-          k3s_sandbox_install "$VM_B_PUB"
+          REMOTE_A="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/ea2_lab.pem ubuntu@${VM_A_PUB}"
+          REMOTE_B="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/ea2_lab.pem ubuntu@${VM_B_PUB}"
+          VM_A_PRIVATE_IP=$($REMOTE_A 'hostname -I | awk "{print \$1}"')
+          NODE_TOKEN=$($REMOTE_A 'sudo cat /var/lib/rancher/k3s/server/node-token')
+          $REMOTE_B "curl -sfL https://get.k3s.io | K3S_URL=https://${VM_A_PRIVATE_IP}:6443 K3S_TOKEN=${NODE_TOKEN} sh -s - agent"
+          sleep 20
+          $REMOTE_A 'sudo kubectl get nodes -o wide'
 
       - name: Kubeconfig en el runner
         env:
           VM_A_PUB: ${{ steps.tf.outputs.vm_a_pub }}
         run: |
           set -euo pipefail
-          # kubectl apply del job usa cluster en VM A (misma convención: primera MV).
           scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ServerAliveInterval=15 -o ServerAliveCountMax=120 \
             -i ~/.ssh/ea2_lab.pem \
