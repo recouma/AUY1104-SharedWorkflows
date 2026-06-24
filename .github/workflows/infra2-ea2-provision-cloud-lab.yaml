@@ -1,16 +1,4 @@
 # EA2 · Laboratorio cloud (VPC + 2 MV k3s autocontenido + NLB TCP + RDS + manifiestos)
-# Estado Terraform en S3 (backend remoto): input s3_status_bucket = mismo bucket variable EA2_S3_BUCKET.
-# IAM: s3:GetObject, PutObject, DeleteObject, ListBucket sobre ea2-cloud-lab/<repo>/terraform.tfstate
-#      (sin Dynamo lock por compat Vocareum; no correr dos applies en paralelo al mismo state).
-#
-# - workflow_call: AWS + EA2_SSH_PRIVATE_KEY + DOCKER_USERNAME/PASSWORD (push Docker Hub).
-# - workflow_dispatch: checkout siempre desde main (ref fijo, sin ramas alternas).
-#
-# El balanceador es un NLB (TCP). Un ALB clasico no reenvia NodePorts TCP arbitrarios.
-# DNS publico: usar el hostname del NLB o Route53 (inputs opcionales en Terraform).
-#
-# AMI + AZ: mismos data sources que infra/ea2-sandbox-vm (receta ea2-provision-k8s-sandbox.yaml).
-
 name: INFRA2 - Provisionar EA2 cloud lab (Terraform + k3s + workloads) (local)
 description: VPC, 2 MV Ubuntu misma instalación k3s (sandbox), NLB TCP, RDS, API en Docker Hub, manifiestos.
 
@@ -46,7 +34,6 @@ on:
         type: string
         default: "30100"
       s3_status_bucket:
-        description: Bucket S3 para backend Terraform (terraform.tfstate persistente entre corridas)
         required: true
         type: string
     secrets:
@@ -94,7 +81,6 @@ on:
         type: string
         default: "30100"
       s3_status_bucket:
-        description: Bucket S3 para terraform.tfstate (ea2-s3-create-bucket u otro; una vez por repo)
         required: true
         type: string
 
@@ -243,8 +229,8 @@ jobs:
           REMOTE_B="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/ea2_lab.pem ubuntu@${VM_B_PUB}"
           VM_A_PRIVATE_IP=$($REMOTE_A 'hostname -I | awk "{print \$1}"')
           NODE_TOKEN=$($REMOTE_A 'sudo cat /var/lib/rancher/k3s/server/node-token')
-          $REMOTE_B "curl -sfL https://get.k3s.io | K3S_URL=https://${VM_A_PRIVATE_IP}:6443 K3S_TOKEN=${NODE_TOKEN} sh -s - agent"
-          sleep 20
+          $REMOTE_B "nohup bash -c 'curl -sfL https://get.k3s.io | K3S_URL=https://${VM_A_PRIVATE_IP}:6443 K3S_TOKEN=${NODE_TOKEN} sh -s - agent' > /tmp/k3s-agent-install.log 2>&1 &"
+          sleep 60
           $REMOTE_A 'sudo kubectl get nodes -o wide'
 
       - name: Kubeconfig en el runner
