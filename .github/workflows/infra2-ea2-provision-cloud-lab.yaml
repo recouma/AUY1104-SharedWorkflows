@@ -1,4 +1,3 @@
-# EA2 · Laboratorio cloud (VPC + 2 MV k3s autocontenido + NLB TCP + RDS + manifiestos)
 name: INFRA2 - Provisionar EA2 cloud lab (Terraform + k3s + workloads) (local)
 description: VPC, 2 MV Ubuntu misma instalación k3s (sandbox), NLB TCP, RDS, API en Docker Hub, manifiestos.
 
@@ -218,6 +217,16 @@ jobs:
           $REMOTE "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--write-kubeconfig-mode 644 --tls-san ${VM_A_PUB}' sh -"
           sleep 15
           $REMOTE 'sudo kubectl get nodes'
+
+      - name: Fix CoreDNS DNS externo
+        env:
+          VM_A_PUB: ${{ steps.tf.outputs.vm_a_pub }}
+        run: |
+          set -euo pipefail
+          REMOTE="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/ea2_lab.pem ubuntu@${VM_A_PUB}"
+          $REMOTE "sudo kubectl get configmap coredns -n kube-system -o yaml | sed 's|forward . /etc/resolv.conf|forward . 8.8.8.8 8.8.4.4|' | sudo kubectl apply -f -"
+          $REMOTE "sudo kubectl rollout restart deployment coredns -n kube-system"
+          sleep 20
 
       - name: Instalar k3s agent (VM B une al cluster de VM A)
         env:
