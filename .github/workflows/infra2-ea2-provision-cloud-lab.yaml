@@ -214,7 +214,7 @@ jobs:
         run: |
           set -euo pipefail
           REMOTE="ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i ~/.ssh/ea2_lab.pem ubuntu@${VM_A_PUB}"
-          $REMOTE "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--write-kubeconfig-mode 644 --tls-san ${VM_A_PUB}' sh -"
+          $REMOTE "curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC='--cluster-cidr 10.44.0.0/16 --write-kubeconfig-mode 644 --tls-san ${VM_A_PUB}' sh -"
           sleep 15
           $REMOTE 'sudo kubectl get nodes'
 
