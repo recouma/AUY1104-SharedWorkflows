@@ -173,8 +173,8 @@ jobs:
           echo "vm_a_pub=$(terraform output -raw vm_a_public_ip)" >> "$GITHUB_OUTPUT"
           echo "vm_b_pub=$(terraform output -raw vm_b_public_ip)" >> "$GITHUB_OUTPUT"
           echo "nlb=$(terraform output -raw nlb_dns_name)" >> "$GITHUB_OUTPUT"
-          echo "rds_primary=$(terraform output -raw rds_primary_endpoint)" >> "$GITHUB_OUTPUT"
-          echo "rds_replica=$(terraform output -raw rds_replica_endpoint)" >> "$GITHUB_OUTPUT"
+          echo "rds_primary=$(terraform output -raw rds_primary_endpoint | cut -d: -f1 | tr -d "\n\r")" >> "$GITHUB_OUTPUT"
+          echo "rds_replica=$(terraform output -raw rds_replica_endpoint | cut -d: -f1 | tr -d "\n\r")" >> "$GITHUB_OUTPUT"
           echo "rds_user=$(terraform output -raw rds_master_username)" >> "$GITHUB_OUTPUT"
 
       - name: Esperar SSH (VM A)
