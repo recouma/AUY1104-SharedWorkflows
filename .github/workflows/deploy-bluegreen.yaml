@@ -9,11 +9,10 @@ on:
       image_tag:
         required: true
         type: string
-      ec2_host:
-        required: true
-        type: string
     secrets:
       EC2_SSH_KEY:
+        required: true
+      EC2_HOST:
         required: true
 
 jobs:
@@ -25,14 +24,13 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/k3s-key.pem
           chmod 400 ~/.ssh/k3s-key.pem
-          ssh-keyscan -H ${{ inputs.ec2_host }} >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Determine active color and deploy
         id: deploy
         run: |
-          SSH_CMD="ssh -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no ubuntu@${{ inputs.ec2_host }}"
+          SSH_CMD="ssh -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }}"
 
-          # Determinar color activo
           ACTIVE_COLOR=$($SSH_CMD "kubectl get svc orders-svc -o jsonpath='{.spec.selector.version}'" 2>/dev/null || echo "blue")
           echo "Active color: $ACTIVE_COLOR"
 
@@ -45,7 +43,6 @@ jobs:
           echo "active=$ACTIVE_COLOR" >> $GITHUB_OUTPUT
           echo "target=$TARGET" >> $GITHUB_OUTPUT
 
-          # Actualizar imagen y escalar deployment target
           $SSH_CMD << ENDSSH
             kubectl set image deployment/orders-$TARGET orders=${{ inputs.image_name }}:${{ inputs.image_tag }}
             kubectl scale deployment/orders-$TARGET --replicas=2
@@ -55,16 +52,13 @@ jobs:
       - name: Health check on target pods
         id: healthcheck
         run: |
-          SSH_CMD="ssh -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no ubuntu@${{ inputs.ec2_host }}"
+          SSH_CMD="ssh -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }}"
           TARGET=${{ steps.deploy.outputs.target }}
 
-          # Obtener IP de un pod target y verificar /health
           $SSH_CMD << ENDSSH
             echo "=== Verificando salud de pods $TARGET ==="
             POD_IP=\$(kubectl get pods -l app=orders,version=$TARGET -o jsonpath='{.items[0].status.podIP}')
             echo "Pod IP: \$POD_IP"
-
-            # Intentar health check 5 veces
             for i in 1 2 3 4 5; do
               RESPONSE=\$(curl -s -o /dev/null -w "%{http_code}" http://\$POD_IP:3000/health 2>/dev/null)
               echo "Intento \$i: HTTP \$RESPONSE"
@@ -81,7 +75,7 @@ jobs:
       - name: Switch traffic to target
         if: success()
         run: |
-          SSH_CMD="ssh -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no ubuntu@${{ inputs.ec2_host }}"
+          SSH_CMD="ssh -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }}"
           TARGET=${{ steps.deploy.outputs.target }}
           ACTIVE=${{ steps.deploy.outputs.active }}
 
@@ -89,7 +83,6 @@ jobs:
             echo "=== Switching traffic: $ACTIVE -> $TARGET ==="
             kubectl patch svc orders-svc -p '{"spec":{"selector":{"version":"'$TARGET'"}}}'
             echo "=== Traffic switched to $TARGET ==="
-            echo "=== Scaling down $ACTIVE ==="
             kubectl scale deployment/orders-$ACTIVE --replicas=0
             echo "=== Verificacion final ==="
             kubectl get pods -l app=orders
@@ -100,7 +93,7 @@ jobs:
       - name: Rollback automatico
         if: failure()
         run: |
-          SSH_CMD="ssh -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no ubuntu@${{ inputs.ec2_host }}"
+          SSH_CMD="ssh -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }}"
           TARGET=${{ steps.deploy.outputs.target }}
           ACTIVE=${{ steps.deploy.outputs.active }}
 
@@ -109,7 +102,6 @@ jobs:
             kubectl scale deployment/orders-$TARGET --replicas=0
             echo "=== Service sigue apuntando a $ACTIVE ==="
             kubectl get svc orders-svc -o jsonpath='{.spec.selector}' && echo
-            echo "=== Pods activos ==="
             kubectl get pods -l app=orders
             echo "=== Verificando servicio estable ==="
             curl -s http://localhost:30090/health
