@@ -10,78 +10,76 @@ on:
         required: true
         type: string
     secrets:
-      EC2_SSH_KEY:
-        required: true
-      EC2_HOST:
+      KUBECONFIG_DATA:
         required: true
 
 jobs:
   deploy-bluegreen:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy Blue-Green
-        uses: appleboy/ssh-action@v1
-        id: deploy
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ubuntu
-          key: ${{ secrets.EC2_SSH_KEY }}
-          command_timeout: 120s
-          script: |
-            echo "=== Determinando color activo ==="
-            ACTIVE=$(kubectl get svc orders-svc -o jsonpath='{.spec.selector.version}' 2>/dev/null || echo "blue")
-            echo "Active: $ACTIVE"
-            if [ "$ACTIVE" = "blue" ]; then TARGET="green"; else TARGET="blue"; fi
-            echo "Target: $TARGET"
+      - name: Setup kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG_DATA }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
 
-            echo "=== Desplegando a $TARGET ==="
-            kubectl set image deployment/orders-$TARGET orders=${{ inputs.image_name }}:${{ inputs.image_tag }}
-            kubectl scale deployment/orders-$TARGET --replicas=2
-            kubectl rollout status deployment/orders-$TARGET --timeout=60s
+      - name: Verify cluster connection
+        run: kubectl get nodes
 
-            echo "=== Health check ==="
-            sleep 5
-            POD_IP=$(kubectl get pods -l app=orders,version=$TARGET -o jsonpath='{.items[0].status.podIP}')
-            echo "Pod IP: $POD_IP"
-            for i in 1 2 3 4 5; do
-              CODE=$(curl -s -o /dev/null -w '%{http_code}' http://$POD_IP:3000/health 2>/dev/null || echo "000")
-              echo "Intento $i: HTTP $CODE"
-              if [ "$CODE" = "200" ]; then
-                echo "=== Health check PASSED ==="
-                echo "=== Switching traffic: $ACTIVE -> $TARGET ==="
-                kubectl patch svc orders-svc -p "{\"spec\":{\"selector\":{\"version\":\"$TARGET\"}}}"
-                kubectl scale deployment/orders-$ACTIVE --replicas=0
-                echo "=== Verificacion final ==="
-                kubectl get pods -l app=orders
-                kubectl get svc orders-svc -o jsonpath='{.spec.selector}' && echo
-                curl -s http://localhost:30090/health && echo
-                echo "=== Deploy Blue-Green exitoso ==="
-                exit 0
-              fi
-              sleep 3
-            done
+      - name: Determine active color
+        id: color
+        run: |
+          ACTIVE=$(kubectl get svc orders-svc -o jsonpath='{.spec.selector.version}' 2>/dev/null || echo "blue")
+          echo "Active: $ACTIVE"
+          if [ "$ACTIVE" = "blue" ]; then
+            echo "target=green" >> $GITHUB_OUTPUT
+            echo "active=blue" >> $GITHUB_OUTPUT
+          else
+            echo "target=blue" >> $GITHUB_OUTPUT
+            echo "active=green" >> $GITHUB_OUTPUT
+          fi
 
-            echo "=== Health check FAILED ==="
-            echo "=== Ejecutando rollback ==="
-            kubectl scale deployment/orders-$TARGET --replicas=0
-            echo "Service sigue apuntando a $ACTIVE"
-            kubectl get pods -l app=orders
-            curl -s http://localhost:30090/health && echo
-            echo "=== Rollback completado ==="
-            exit 1
+      - name: Deploy to inactive environment
+        run: |
+          TARGET=${{ steps.color.outputs.target }}
+          echo "Deploying ${{ inputs.image_name }}:${{ inputs.image_tag }} to $TARGET"
+          kubectl set image deployment/orders-$TARGET orders=${{ inputs.image_name }}:${{ inputs.image_tag }}
+          kubectl scale deployment/orders-$TARGET --replicas=2
+          kubectl rollout status deployment/orders-$TARGET --timeout=60s
 
-      - name: Rollback on pipeline failure
+      - name: Health check on target pods
+        run: |
+          TARGET=${{ steps.color.outputs.target }}
+          echo "Running health check on $TARGET pods..."
+          sleep 5
+          POD_IP=$(kubectl get pods -l app=orders,version=$TARGET -o jsonpath='{.items[0].status.podIP}')
+          echo "Pod IP: $POD_IP"
+          kubectl run healthcheck-$TARGET --image=curlimages/curl --restart=Never --rm -i --timeout=30s -- curl -sf http://$POD_IP:3000/health
+          echo "Health check PASSED"
+
+      - name: Switch traffic to target
+        if: success()
+        run: |
+          TARGET=${{ steps.color.outputs.target }}
+          ACTIVE=${{ steps.color.outputs.active }}
+          echo "=== Switching traffic: $ACTIVE -> $TARGET ==="
+          kubectl patch svc orders-svc -p "{\"spec\":{\"selector\":{\"version\":\"$TARGET\"}}}"
+          echo "=== Scaling down $ACTIVE ==="
+          kubectl scale deployment/orders-$ACTIVE --replicas=0
+          echo "=== Verificacion final ==="
+          kubectl get pods -l app=orders
+          kubectl get svc orders-svc -o jsonpath='{.spec.selector}' && echo
+          echo "=== Deploy Blue-Green exitoso ==="
+
+      - name: Rollback automatico
         if: failure()
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ubuntu
-          key: ${{ secrets.EC2_SSH_KEY }}
-          command_timeout: 60s
-          script: |
-            ACTIVE=$(kubectl get svc orders-svc -o jsonpath='{.spec.selector.version}')
-            kubectl scale deployment/orders-green --replicas=0 2>/dev/null || true
-            kubectl scale deployment/orders-blue --replicas=0 2>/dev/null || true
-            kubectl scale deployment/orders-$ACTIVE --replicas=2
-            echo "Rollback de emergencia completado - $ACTIVE activo"
-            kubectl get pods -l app=orders
+        run: |
+          TARGET=${{ steps.color.outputs.target }}
+          ACTIVE=${{ steps.color.outputs.active }}
+          echo "=== ROLLBACK: Revirtiendo deploy fallido ==="
+          kubectl scale deployment/orders-$TARGET --replicas=0 || true
+          kubectl scale deployment/orders-$ACTIVE --replicas=2 || true
+          echo "=== Service sigue apuntando a $ACTIVE ==="
+          kubectl get svc orders-svc -o jsonpath='{.spec.selector}' && echo
+          kubectl get pods -l app=orders
+          echo "=== Rollback completado ==="
