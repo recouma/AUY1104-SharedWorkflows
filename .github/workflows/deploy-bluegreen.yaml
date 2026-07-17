@@ -26,85 +26,71 @@ jobs:
           chmod 400 ~/.ssh/k3s-key.pem
           ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
 
-      - name: Determine active color and deploy
+      - name: Determine active color
+        id: color
+        run: |
+          ACTIVE=$(ssh -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@${{ secrets.EC2_HOST }} "kubectl get svc orders-svc -o jsonpath='{.spec.selector.version}'" 2>/dev/null || echo "blue")
+          echo "Active: $ACTIVE"
+          if [ "$ACTIVE" = "blue" ]; then
+            echo "target=green" >> $GITHUB_OUTPUT
+            echo "active=blue" >> $GITHUB_OUTPUT
+          else
+            echo "target=blue" >> $GITHUB_OUTPUT
+            echo "active=green" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy to inactive environment
         id: deploy
         run: |
-          SSH_CMD="ssh -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }}"
-
-          ACTIVE_COLOR=$($SSH_CMD "kubectl get svc orders-svc -o jsonpath='{.spec.selector.version}'" 2>/dev/null || echo "blue")
-          echo "Active color: $ACTIVE_COLOR"
-
-          if [ "$ACTIVE_COLOR" = "blue" ]; then
-            TARGET="green"
-          else
-            TARGET="blue"
-          fi
-          echo "Deploying to: $TARGET"
-          echo "active=$ACTIVE_COLOR" >> $GITHUB_OUTPUT
-          echo "target=$TARGET" >> $GITHUB_OUTPUT
-
-          $SSH_CMD << ENDSSH
-            kubectl set image deployment/orders-$TARGET orders=${{ inputs.image_name }}:${{ inputs.image_tag }}
-            kubectl scale deployment/orders-$TARGET --replicas=2
-            kubectl rollout status deployment/orders-$TARGET --timeout=60s
-          ENDSSH
+          SSH="ssh -T -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@${{ secrets.EC2_HOST }}"
+          TARGET=${{ steps.color.outputs.target }}
+          echo "Deploying ${{ inputs.image_name }}:${{ inputs.image_tag }} to $TARGET"
+          $SSH "kubectl set image deployment/orders-$TARGET orders=${{ inputs.image_name }}:${{ inputs.image_tag }}"
+          $SSH "kubectl scale deployment/orders-$TARGET --replicas=2"
+          $SSH "kubectl rollout status deployment/orders-$TARGET --timeout=60s"
 
       - name: Health check on target pods
-        id: healthcheck
         run: |
-          SSH_CMD="ssh -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }}"
-          TARGET=${{ steps.deploy.outputs.target }}
-
-          $SSH_CMD << ENDSSH
-            echo "=== Verificando salud de pods $TARGET ==="
-            POD_IP=\$(kubectl get pods -l app=orders,version=$TARGET -o jsonpath='{.items[0].status.podIP}')
-            echo "Pod IP: \$POD_IP"
-            for i in 1 2 3 4 5; do
-              RESPONSE=\$(curl -s -o /dev/null -w "%{http_code}" http://\$POD_IP:3000/health 2>/dev/null)
-              echo "Intento \$i: HTTP \$RESPONSE"
-              if [ "\$RESPONSE" = "200" ]; then
-                echo "Health check OK"
-                exit 0
-              fi
-              sleep 3
-            done
-            echo "Health check FAILED"
-            exit 1
-          ENDSSH
+          SSH="ssh -T -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@${{ secrets.EC2_HOST }}"
+          TARGET=${{ steps.color.outputs.target }}
+          echo "Running health check on $TARGET pods..."
+          for i in 1 2 3 4 5; do
+            RESULT=$($SSH "curl -s -o /dev/null -w '%{http_code}' http://\$(kubectl get pods -l app=orders,version=$TARGET -o jsonpath='{.items[0].status.podIP}'):3000/health")
+            echo "Attempt $i: HTTP $RESULT"
+            if [ "$RESULT" = "200" ]; then
+              echo "Health check PASSED"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Health check FAILED"
+          exit 1
 
       - name: Switch traffic to target
         if: success()
         run: |
-          SSH_CMD="ssh -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }}"
-          TARGET=${{ steps.deploy.outputs.target }}
-          ACTIVE=${{ steps.deploy.outputs.active }}
-
-          $SSH_CMD << ENDSSH
-            echo "=== Switching traffic: $ACTIVE -> $TARGET ==="
-            kubectl patch svc orders-svc -p '{"spec":{"selector":{"version":"'$TARGET'"}}}'
-            echo "=== Traffic switched to $TARGET ==="
-            kubectl scale deployment/orders-$ACTIVE --replicas=0
-            echo "=== Verificacion final ==="
-            kubectl get pods -l app=orders
-            kubectl get svc orders-svc -o jsonpath='{.spec.selector}' && echo
-            curl -s http://localhost:30090/health
-          ENDSSH
+          SSH="ssh -T -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@${{ secrets.EC2_HOST }}"
+          TARGET=${{ steps.color.outputs.target }}
+          ACTIVE=${{ steps.color.outputs.active }}
+          echo "=== Switching traffic: $ACTIVE -> $TARGET ==="
+          $SSH "kubectl patch svc orders-svc -p '{\"spec\":{\"selector\":{\"version\":\"$TARGET\"}}}'"
+          echo "=== Scaling down $ACTIVE ==="
+          $SSH "kubectl scale deployment/orders-$ACTIVE --replicas=0"
+          echo "=== Verificacion final ==="
+          $SSH "kubectl get pods -l app=orders"
+          $SSH "kubectl get svc orders-svc -o jsonpath='{.spec.selector}'"
+          $SSH "curl -s http://localhost:30090/health"
 
       - name: Rollback automatico
         if: failure()
         run: |
-          SSH_CMD="ssh -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }}"
-          TARGET=${{ steps.deploy.outputs.target }}
-          ACTIVE=${{ steps.deploy.outputs.active }}
-
-          $SSH_CMD << ENDSSH
-            echo "=== ROLLBACK: Revirtiendo deploy fallido ==="
-            kubectl scale deployment/orders-$TARGET --replicas=0
-            echo "=== Service sigue apuntando a $ACTIVE ==="
-            kubectl get svc orders-svc -o jsonpath='{.spec.selector}' && echo
-            kubectl get pods -l app=orders
-            echo "=== Verificando servicio estable ==="
-            curl -s http://localhost:30090/health
-            echo ""
-            echo "=== Rollback completado ==="
-          ENDSSH
+          SSH="ssh -T -i ~/.ssh/k3s-key.pem -o StrictHostKeyChecking=no -o ConnectTimeout=10 ubuntu@${{ secrets.EC2_HOST }}"
+          TARGET=${{ steps.color.outputs.target }}
+          ACTIVE=${{ steps.color.outputs.active }}
+          echo "=== ROLLBACK: Revirtiendo deploy fallido ==="
+          $SSH "kubectl scale deployment/orders-$TARGET --replicas=0" || true
+          echo "=== Service sigue apuntando a $ACTIVE ==="
+          $SSH "kubectl get svc orders-svc -o jsonpath='{.spec.selector}'" || true
+          $SSH "kubectl get pods -l app=orders" || true
+          $SSH "curl -s http://localhost:30090/health" || true
+          echo "=== Rollback completado ==="
