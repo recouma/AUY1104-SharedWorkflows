@@ -19,27 +19,15 @@ jobs:
   deploy-bluegreen:
     runs-on: ubuntu-latest
     steps:
-      - name: Setup SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/k3s-key.pem
-          chmod 400 ~/.ssh/k3s-key.pem
-          cat >> ~/.ssh/config << EOF
-          Host k3s-server
-            HostName ${{ secrets.EC2_HOST }}
-            User ubuntu
-            IdentityFile ~/.ssh/k3s-key.pem
-            StrictHostKeyChecking no
-            ConnectTimeout 30
-            ServerAliveInterval 15
-            ServerAliveCountMax 3
-          EOF
-
       - name: Deploy Blue-Green
+        uses: appleboy/ssh-action@v1
         id: deploy
-        run: |
-          ssh k3s-server << 'REMOTESCRIPT'
-            set -e
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 120s
+          script: |
             echo "=== Determinando color activo ==="
             ACTIVE=$(kubectl get svc orders-svc -o jsonpath='{.spec.selector.version}' 2>/dev/null || echo "blue")
             echo "Active: $ACTIVE"
@@ -59,32 +47,41 @@ jobs:
               CODE=$(curl -s -o /dev/null -w '%{http_code}' http://$POD_IP:3000/health 2>/dev/null || echo "000")
               echo "Intento $i: HTTP $CODE"
               if [ "$CODE" = "200" ]; then
-                echo "Health check PASSED"
-                
+                echo "=== Health check PASSED ==="
                 echo "=== Switching traffic: $ACTIVE -> $TARGET ==="
                 kubectl patch svc orders-svc -p "{\"spec\":{\"selector\":{\"version\":\"$TARGET\"}}}"
                 kubectl scale deployment/orders-$ACTIVE --replicas=0
-                
                 echo "=== Verificacion final ==="
                 kubectl get pods -l app=orders
                 kubectl get svc orders-svc -o jsonpath='{.spec.selector}' && echo
                 curl -s http://localhost:30090/health && echo
-                echo "=== Deploy exitoso ==="
+                echo "=== Deploy Blue-Green exitoso ==="
                 exit 0
               fi
               sleep 3
             done
 
-            echo "=== Health check FAILED - Ejecutando rollback ==="
+            echo "=== Health check FAILED ==="
+            echo "=== Ejecutando rollback ==="
             kubectl scale deployment/orders-$TARGET --replicas=0
             echo "Service sigue apuntando a $ACTIVE"
             kubectl get pods -l app=orders
             curl -s http://localhost:30090/health && echo
             echo "=== Rollback completado ==="
             exit 1
-          REMOTESCRIPT
 
       - name: Rollback on pipeline failure
         if: failure()
-        run: |
-          ssh k3s-server "kubectl scale deployment/orders-green --replicas=0 2>/dev/null; kubectl scale deployment/orders-blue --replicas=0 2>/dev/null; ACTIVE=\$(kubectl get svc orders-svc -o jsonpath='{.spec.selector.version}'); kubectl scale deployment/orders-\$ACTIVE --replicas=2; echo 'Rollback de emergencia completado'" || echo "No se pudo conectar para rollback"
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 60s
+          script: |
+            ACTIVE=$(kubectl get svc orders-svc -o jsonpath='{.spec.selector.version}')
+            kubectl scale deployment/orders-green --replicas=0 2>/dev/null || true
+            kubectl scale deployment/orders-blue --replicas=0 2>/dev/null || true
+            kubectl scale deployment/orders-$ACTIVE --replicas=2
+            echo "Rollback de emergencia completado - $ACTIVE activo"
+            kubectl get pods -l app=orders
